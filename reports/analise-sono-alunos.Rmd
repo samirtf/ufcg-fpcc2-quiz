@@ -1,0 +1,282 @@
+---
+title: "ICs com o pacote boot"
+author: "Nazareno"
+output:
+  html_document:
+    theme: readable
+    df_print: paged
+    code_folding: show
+    toc: yes
+  html_notebook:
+    fig_width: 7
+    theme: readable
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+theme_set(theme_bw())
+```
+
+## Os dados
+
+```{r}
+# Curso
+# Timestamp,
+# Q1 - Quantas horas por noite você dorme DURANTE A SEMANA em média?
+# Q2 - Quantas horas por noite você dorme durante NO FIM DE SEMANA em média?
+# Q3 - Quantas disciplinas você está cursando esse semestre?
+# Q4 - Quantas xícaras de café você tomou ontem?
+# Q5 - Quantas pessoas você segue no github?
+# Q6 - Quantas pessoas seguem você no github?
+# Q7 - Você está dois períodos ou menos de concluir?
+
+dados = read_csv(here::here("data/sono-alunos.csv"),
+                  col_types = cols(
+                        curso = col_character(),
+                        timestamp = col_character(),
+                        q1 = col_double(),
+                        q2 = col_double(),
+                        q3 = col_double(),
+                        q4 = col_double(),
+                        q5 = col_double(),
+                        q6 = col_double(),
+                        q7 = col_character()
+                    )
+                 )
+dados = dados %>%
+  rename(
+    sono_semana = `q1`,
+    sono_fds = `q2`
+)
+dados = dados %>% 
+  mutate(impacto_sono =  sono_semana - sono_fds)
+```
+
+```{r}
+dados
+```
+
+```{r}
+dados %>%
+    filter(curso == "CDD") %>%
+    summarise(
+        min_sem = min(sono_semana),
+        max_sem = max(sono_semana),
+        median_sem = median(sono_semana),
+        mean_sem = mean(sono_semana),
+        min_fds = min(sono_fds),
+        max_fds = max(sono_fds),
+        median_fds = median(sono_fds),
+        mean_fds = mean(sono_fds),
+        .groups = "drop"
+    )
+```
+
+```{r}
+dados %>%
+    filter(curso == "FPCC") %>%
+    summarise(
+        min_sem = min(sono_semana),
+        max_sem = max(sono_semana),
+        median_sem = median(sono_semana),
+        mean_sem = mean(sono_semana),
+        min_fds = min(sono_fds),
+        max_fds = max(sono_fds),
+        median_fds = median(sono_fds),
+        mean_fds = mean(sono_fds),
+        .groups = "drop"
+    )
+```
+
+## IC da diferença das médias
+
+```{r}
+dados %>%
+    mutate(impacto = sono_semana - sono_fds) %>%
+    select(curso, impacto) %>%
+    spread(key = curso, value = impacto)
+```
+
+```{r}
+diferenca <- function(d, i) {
+    agrupado = d %>% 
+        slice(i) %>% 
+        group_by(curso) %>% 
+        summarise(media_impacto = mean(impacto_sono), .groups = "drop")
+    a = agrupado %>% filter(curso == "CDD") %>% pull(media_impacto)
+    b = agrupado %>% filter(curso == "FPCC") %>% pull(media_impacto)
+    a - b
+}
+theta_c = diferenca(dados, 1:nrow(dados))
+theta_c
+```
+
+```{r}
+dados %>% 
+        slice(1:nrow(dados)) %>% 
+        group_by(curso) %>% 
+        summarise(media_impacto = mean(impacto_sono), .groups = "drop")
+```
+
+
+
+```{r}
+booted <- boot(data = dados , 
+               statistic = diferenca, 
+               R = 2000)
+ci = tidy(booted, 
+          conf.level = .95,
+          conf.method = "bca",
+          conf.int = TRUE)
+glimpse(ci)
+```
+
+
+```{r}
+ci %>% 
+  ggplot(aes(
+            ymin = conf.low,
+            y = statistic,
+            ymax = conf.high,
+            x = ""
+        )) +
+        geom_point(size = 2) +
+        geom_errorbar(aes(y = statistic, ymin = conf.low, ymax = conf.high), width=0.2) +
+        scale_y_continuous(limits = c(-2, 2)) +
+        labs(x = "", y = "Diferença na média de impacto no sono entre turmas da graduação e pós-graduação",
+             title= "Intervalo de Confiança da diferença das médias: Graduação - Pós-graduação") +
+        coord_flip()
+```
+
+
+
+
+
+
+
+
+
+## QUESTAO 2
+
+```{r}
+graduacao = dados %>% 
+  filter(curso == "CDD")
+```
+
+```{r}
+graduacao %>% 
+  summarise(media = mean(impacto_sono))
+```
+```{r}
+dados %>% 
+        slice(1:(nrow(graduacao))) %>% 
+        summarise(media_curso = mean(impacto_sono))
+
+```
+
+```{r}
+s <- function(d, i) {
+    sumarizado = d %>% 
+        slice(i) %>% 
+        summarise(media_curso = mean(impacto_sono))
+    
+    sumarizado %>% 
+      pull(media_curso)
+}
+s(graduacao, 1:(nrow(graduacao))) # theta_chapeu
+```
+
+```{r}
+library(boot)
+library(broom)
+booted <- boot(data = graduacao, 
+               statistic = s, 
+               R = 2000)
+ci_graduacao = tidy(booted, 
+              conf.level = .95,
+              conf.method = "bca",
+              conf.int = TRUE)
+glimpse(ci_graduacao)
+```
+
+```{r}
+ci_graduacao %>% 
+  ggplot(aes(
+            ymin = conf.low,
+            y = statistic,
+            ymax = conf.high,
+            x = "Turma de graduação (CDD)"
+        )) +
+        geom_point(size = 2) +
+        geom_errorbar(aes(y = statistic, ymin = conf.low, ymax = conf.high), width=0.2) +
+        scale_y_continuous(limits = c(-3, 3)) +
+        labs(x = "", y = "Média de impacto do curso no sono dos alunos",
+             title= "Intervalo de Confiança") +
+        coord_flip()
+```
+
+```{r}
+posgraduacao = dados %>% 
+  filter(curso == "FPCC")
+posgraduacao %>% 
+  summarise(media = mean(impacto_sono))
+```
+
+```{r}
+booted <- boot(data = posgraduacao, 
+               statistic = s, 
+               R = 2000)
+ci_posgraduacao = tidy(booted, 
+               conf.level = .95,
+               conf.method = "bca",
+               conf.int = TRUE)
+glimpse(ci_posgraduacao)
+```
+
+```{r}
+ci_posgraduacao %>% 
+  ggplot(aes(
+            ymin = conf.low,
+            y = statistic,
+            ymax = conf.high,
+            x = "Turma de pós-graduação (FPCC)"
+        )) +
+        geom_point(size = 2) +
+        geom_errorbar(aes(y = statistic, ymin = conf.low, ymax = conf.high), width=0.2) +
+        scale_y_continuous(limits = c(-3, 3)) +
+        labs(x = "", y = "Média de impacto do curso no sono dos alunos",
+             title= "Intervalo de Confiança") +
+        coord_flip()
+```
+
+
+```{r}
+cis = bind_rows(
+  "Graduação (CDD)" = ci_graduacao, 
+  "Pós-graduação (FPCC)" = ci_posgraduacao, 
+  .id = "grupo"
+)
+```
+
+```{r}
+cis %>% 
+  ggplot(aes(
+            ymin = conf.low,
+            y = statistic,
+            ymax = conf.high,
+            x = grupo
+        )) +
+        geom_point(size = 2) +
+        geom_errorbar(aes(y = statistic, ymin = conf.low, ymax = conf.high), width=0.2) +
+        scale_y_continuous(limits = c(-3, 0)) +
+        labs(x = "", y = "Média de impacto do curso no sono") +
+        coord_flip()
+```
+
+
+```{r}
+cis
+```
